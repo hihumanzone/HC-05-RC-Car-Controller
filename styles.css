@@ -19,7 +19,6 @@
 
 * { box-sizing: border-box; }
 
-/* FIX: html + body strictly fill the viewport — no scroll, no overflow */
 html {
   height: 100%;
 }
@@ -34,7 +33,6 @@ html, body {
 }
 
 body {
-  /* FIX: height (not min-height) so body never grows beyond the viewport */
   height: 100dvh;
   overflow: hidden;
   padding:
@@ -61,7 +59,6 @@ button {
   -webkit-backdrop-filter: blur(16px);
 }
 
-/* FIX: app-shell fills body content-box exactly — body padding handles safe areas */
 .app-shell {
   height: 100%;
   display: grid;
@@ -70,40 +67,37 @@ button {
   min-height: 0;
 }
 
+/* ─── Topbar ─────────────────────────────────────────────────────────────
+   Single flex row: [pill] [4 mini cells] [buttons]
+   No title column — nothing is wasted on the left.                       */
 .topbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.9fr) auto;
-  gap: var(--gap);
-  padding: 16px 18px;
+  display: flex;
   align-items: center;
+  gap: var(--gap);
+  padding: 10px 16px;
 }
 
-.title-block h1 {
-  margin: 0;
-  font-size: clamp(18px, 2.5vw, 28px);
-}
-
-.title-block p {
-  margin: 6px 0 0;
-  color: var(--muted);
-  font-size: 14px;
-}
-
+/* Status block fills the remaining width between the pill and the buttons */
 .status-block {
-  display: grid;
+  display: flex;
+  align-items: center;
   gap: 10px;
+  flex: 1;
+  min-width: 0;
 }
 
 .status-pill {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  width: fit-content;
-  padding: 10px 14px;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 8px 14px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: rgba(15, 23, 42, 0.6);
   font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
 }
 
 .dot {
@@ -130,17 +124,20 @@ button {
   box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.16);
 }
 
+/* 4 mini cells in one row, sharing space equally */
 .mini-status-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
 }
 
 .mini-status-grid > div {
   display: grid;
-  gap: 3px;
-  padding: 8px 10px;
-  border-radius: 14px;
+  gap: 2px;
+  padding: 7px 10px;
+  border-radius: 12px;
   border: 1px solid var(--line);
   background: var(--panel-alt);
   min-width: 0;
@@ -148,7 +145,7 @@ button {
 
 .label {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
@@ -157,22 +154,22 @@ button {
   color: var(--text);
   font-weight: 700;
   font-size: 13px;
-  word-break: break-word;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* Buttons sit in a horizontal row, flush to the right */
 .action-block {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  flex-direction: row;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .top-button {
-  min-width: 130px;
-  padding: 13px 16px;
-  border-radius: 18px;
+  padding: 10px 18px;
+  border-radius: 14px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   color: var(--text);
   background: linear-gradient(180deg, rgba(148, 163, 184, 0.18), rgba(15, 23, 42, 0.94));
@@ -194,16 +191,15 @@ button {
   display: none !important;
 }
 
-/* FIX: controller layout — min-height: 0 lets it shrink within the 1fr grid row */
+/* ─── Controller layout ──────────────────────────────────────────────── */
 .controller-layout {
   display: grid;
-  grid-template-columns: 1fr minmax(200px, 26vw) 1fr;
+  grid-template-columns: 1fr minmax(180px, 24vw) 1fr;
   gap: var(--gap);
   min-height: 0;
   overflow: hidden;
 }
 
-/* FIX: panels never bleed outside their grid cell */
 .panel {
   min-height: 0;
   overflow: hidden;
@@ -236,8 +232,9 @@ button {
   grid-template-columns: var(--button-size) var(--button-size);
 }
 
+/* FIX: throttle buttons now sit side by side (horizontal), same as steering */
 .throttle-grid {
-  grid-template-columns: 1fr;
+  grid-template-columns: var(--button-size) var(--button-size);
 }
 
 .drive-button {
@@ -277,7 +274,7 @@ button {
     rgba(8, 47, 73, 0.94);
 }
 
-/* FIX: center panel — scrollable so its content never overflows the grid cell */
+/* ─── Center panel ───────────────────────────────────────────────────── */
 .center-panel {
   gap: 10px;
   text-align: center;
@@ -342,8 +339,7 @@ button {
   display: block;
 }
 
-/* FIX: rotate overlay — uses flex so the card is properly centred and
-   never clips or overflows the screen width at any portrait size */
+/* ─── Rotate overlay ─────────────────────────────────────────────────── */
 .rotate-overlay {
   display: none;
   position: fixed;
@@ -357,8 +353,6 @@ button {
   overflow: hidden;
 }
 
-/* FIX: card stretches to use the full available width (overlay padding - safe areas),
-   capped at 420px — prevents text from overflowing on narrow phones */
 .rotate-card {
   width: min(100%, 420px);
   padding: clamp(20px, 5vw, 28px);
@@ -383,84 +377,53 @@ button {
   }
 }
 
-/* FIX: breakpoint reduced from 1080px → 640px.
-   Landscape phones are typically 600–900px wide — they should keep the
-   3-column topbar, not collapse it and waste vertical space. */
+/* ─── Narrow screens (<640 px) — only truly tiny landscape widths ─────── */
 @media (max-width: 640px) {
-  .topbar {
-    grid-template-columns: 1fr;
-  }
-
-  .action-block {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-
-  .top-button {
-    min-width: 110px;
-  }
-}
-
-@media (max-width: 860px) {
-  .controller-layout {
-    grid-template-columns: 1fr 200px 1fr;
-  }
-}
-
-@media (max-width: 700px) {
-  :root {
-    --button-size: min(27vw, 22vh);
-  }
-}
-
-/* FIX: compact layout for landscape phones (height ≤ 500px).
-   Shrinks the topbar so the controller gets enough vertical space to
-   display the drive buttons at a usable size. */
-@media (max-height: 500px) and (orientation: landscape) {
-  :root {
-    --gap: clamp(6px, 1.2vw, 12px);
-    --button-size: min(24vw, 22vh);
-  }
-
-  .topbar {
-    padding: 8px 14px;
-  }
-
-  .title-block h1 {
-    font-size: clamp(13px, 2vw, 18px);
-  }
-
-  /* Subtitle not needed while driving */
-  .title-block p {
-    display: none;
-  }
-
-  .status-block {
-    gap: 6px;
-  }
-
-  .status-pill {
-    padding: 5px 10px;
-    font-size: 12px;
+  .status-pill span:last-child {
+    display: none; /* hide text, keep dot */
   }
 
   .mini-status-grid {
-    gap: 5px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 800px) {
+  .controller-layout {
+    grid-template-columns: 1fr 170px 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  :root {
+    --button-size: min(26vw, 22vh);
+  }
+}
+
+/* ─── Compact mode for landscape phones (height ≤ 500 px) ────────────── */
+@media (max-height: 500px) and (orientation: landscape) {
+  :root {
+    --gap: clamp(6px, 1.2vw, 12px);
+    --button-size: min(23vw, 22vh);
+  }
+
+  .topbar {
+    padding: 7px 14px;
+  }
+
+  .status-pill {
+    padding: 6px 10px;
+    font-size: 12px;
   }
 
   .mini-status-grid > div {
     padding: 5px 8px;
   }
 
-  .action-block {
-    gap: 6px;
-  }
-
   .top-button {
     padding: 7px 12px;
-    min-width: 96px;
     font-size: 12px;
-    border-radius: 12px;
+    border-radius: 11px;
   }
 
   .panel {
@@ -472,8 +435,6 @@ button {
     font-size: 10px;
   }
 
-  /* FIX: hide informational boxes in compact mode — only the error-box
-     (different class) remains visible so alerts are never suppressed */
   .summary-box {
     display: none;
   }
@@ -483,7 +444,6 @@ button {
     font-size: clamp(28px, 3.8vw, 40px);
   }
 
-  /* Re-centre the car visual now that summary boxes are hidden */
   .center-panel {
     align-content: center;
     gap: 6px;
