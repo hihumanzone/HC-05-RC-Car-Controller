@@ -1,0 +1,491 @@
+:root {
+  --bg-top: #020617;
+  --bg-bottom: #111827;
+  --panel: rgba(15, 23, 42, 0.9);
+  --panel-alt: rgba(30, 41, 59, 0.92);
+  --line: rgba(148, 163, 184, 0.22);
+  --text: #e5eefb;
+  --muted: #94a3b8;
+  --accent: #38bdf8;
+  --accent-strong: #0ea5e9;
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --danger: #ef4444;
+  --shadow: 0 16px 38px rgba(2, 8, 23, 0.42);
+  --radius: 24px;
+  --gap: clamp(10px, 1.8vw, 20px);
+  --button-size: min(25vw, 24vh);
+}
+
+* { box-sizing: border-box; }
+
+/* FIX: html + body strictly fill the viewport — no scroll, no overflow */
+html {
+  height: 100%;
+}
+
+html, body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top, rgba(56, 189, 248, 0.18), transparent 28%),
+    linear-gradient(160deg, var(--bg-top) 0%, #0f172a 48%, var(--bg-bottom) 100%);
+}
+
+body {
+  /* FIX: height (not min-height) so body never grows beyond the viewport */
+  height: 100dvh;
+  overflow: hidden;
+  padding:
+    max(14px, env(safe-area-inset-top))
+    max(14px, env(safe-area-inset-right))
+    max(14px, env(safe-area-inset-bottom))
+    max(14px, env(safe-area-inset-left));
+  overscroll-behavior: none;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+button {
+  font: inherit;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* FIX: app-shell fills body content-box exactly — body padding handles safe areas */
+.app-shell {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: var(--gap);
+  min-height: 0;
+}
+
+.topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.9fr) auto;
+  gap: var(--gap);
+  padding: 16px 18px;
+  align-items: center;
+}
+
+.title-block h1 {
+  margin: 0;
+  font-size: clamp(18px, 2.5vw, 28px);
+}
+
+.title-block p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.status-block {
+  display: grid;
+  gap: 10px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(15, 23, 42, 0.6);
+  font-weight: 600;
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.12);
+  flex-shrink: 0;
+}
+
+.dot.connected {
+  background: var(--ok);
+  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.16);
+}
+
+.dot.connecting {
+  background: var(--warn);
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.16);
+}
+
+.dot.error {
+  background: var(--danger);
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.16);
+}
+
+.mini-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mini-status-grid > div {
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel-alt);
+  min-width: 0;
+}
+
+.label {
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.value {
+  color: var(--text);
+  font-weight: 700;
+  font-size: 13px;
+  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.top-button {
+  min-width: 130px;
+  padding: 13px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  color: var(--text);
+  background: linear-gradient(180deg, rgba(148, 163, 184, 0.18), rgba(15, 23, 42, 0.94));
+  box-shadow: var(--shadow);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.top-button.primary {
+  border-color: rgba(56, 189, 248, 0.22);
+  background: linear-gradient(180deg, rgba(56, 189, 248, 0.24), rgba(15, 23, 42, 0.94));
+}
+
+.top-button:disabled {
+  opacity: 0.55;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* FIX: controller layout — min-height: 0 lets it shrink within the 1fr grid row */
+.controller-layout {
+  display: grid;
+  grid-template-columns: 1fr minmax(200px, 26vw) 1fr;
+  gap: var(--gap);
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* FIX: panels never bleed outside their grid cell */
+.panel {
+  min-height: 0;
+  overflow: hidden;
+  padding: clamp(12px, 1.8vw, 22px);
+}
+
+.panel-heading {
+  color: var(--muted);
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  margin-bottom: 12px;
+}
+
+.steering-panel,
+.throttle-panel,
+.center-panel {
+  display: grid;
+  align-content: center;
+}
+
+.button-grid {
+  display: grid;
+  justify-content: center;
+  gap: var(--gap);
+}
+
+.steering-grid {
+  grid-template-columns: var(--button-size) var(--button-size);
+}
+
+.throttle-grid {
+  grid-template-columns: 1fr;
+}
+
+.drive-button {
+  width: var(--button-size);
+  height: var(--button-size);
+  border-radius: 28px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  color: var(--text);
+  background:
+    linear-gradient(180deg, rgba(148, 163, 184, 0.18), rgba(15, 23, 42, 0.9)),
+    rgba(15, 23, 42, 0.9);
+  box-shadow: var(--shadow);
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  text-align: center;
+  touch-action: none;
+  transition: transform 100ms ease, border-color 100ms ease, background 100ms ease;
+}
+
+.drive-button .arrow {
+  font-size: clamp(28px, 4.5vw, 46px);
+  line-height: 1;
+}
+
+.drive-button .text {
+  font-size: clamp(13px, 1.8vw, 20px);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.drive-button.active {
+  transform: scale(0.97);
+  border-color: rgba(56, 189, 248, 0.72);
+  background:
+    linear-gradient(180deg, rgba(56, 189, 248, 0.36), rgba(8, 47, 73, 0.94)),
+    rgba(8, 47, 73, 0.94);
+}
+
+/* FIX: center panel — scrollable so its content never overflows the grid cell */
+.center-panel {
+  gap: 10px;
+  text-align: center;
+  overflow-y: auto;
+  overflow-x: hidden;
+  align-content: start;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.2) transparent;
+}
+
+.center-panel::-webkit-scrollbar {
+  width: 4px;
+}
+
+.center-panel::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 999px;
+}
+
+.car-visual {
+  margin-inline: auto;
+  width: min(120px, 65%);
+  aspect-ratio: 1.12 / 1;
+  border-radius: 26px;
+  display: grid;
+  place-items: center;
+  font-size: clamp(44px, 5.5vw, 66px);
+  border: 1px solid rgba(56, 189, 248, 0.24);
+  background:
+    radial-gradient(circle at 50% 25%, rgba(56, 189, 248, 0.28), transparent 42%),
+    linear-gradient(180deg, rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), var(--shadow);
+}
+
+.summary-box {
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--panel-alt);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.subtle-note {
+  color: var(--muted);
+}
+
+.error-box {
+  display: none;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  background: rgba(127, 29, 29, 0.30);
+  color: #fecaca;
+  font-size: 13px;
+  text-align: left;
+}
+
+.error-box.show {
+  display: block;
+}
+
+/* FIX: rotate overlay — uses flex so the card is properly centred and
+   never clips or overflows the screen width at any portrait size */
+.rotate-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  padding: clamp(16px, 5vw, 32px);
+  background: rgba(2, 8, 23, 0.95);
+  z-index: 999;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  overflow: hidden;
+}
+
+/* FIX: card stretches to use the full available width (overlay padding - safe areas),
+   capped at 420px — prevents text from overflowing on narrow phones */
+.rotate-card {
+  width: min(100%, 420px);
+  padding: clamp(20px, 5vw, 28px);
+  overflow: hidden;
+}
+
+.rotate-card h2 {
+  margin: 0 0 10px;
+  font-size: clamp(18px, 5vw, 24px);
+}
+
+.rotate-card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(13px, 3.5vw, 15px);
+  line-height: 1.5;
+}
+
+@media (orientation: portrait) {
+  .rotate-overlay {
+    display: flex;
+  }
+}
+
+/* FIX: breakpoint reduced from 1080px → 640px.
+   Landscape phones are typically 600–900px wide — they should keep the
+   3-column topbar, not collapse it and waste vertical space. */
+@media (max-width: 640px) {
+  .topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .action-block {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .top-button {
+    min-width: 110px;
+  }
+}
+
+@media (max-width: 860px) {
+  .controller-layout {
+    grid-template-columns: 1fr 200px 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  :root {
+    --button-size: min(27vw, 22vh);
+  }
+}
+
+/* FIX: compact layout for landscape phones (height ≤ 500px).
+   Shrinks the topbar so the controller gets enough vertical space to
+   display the drive buttons at a usable size. */
+@media (max-height: 500px) and (orientation: landscape) {
+  :root {
+    --gap: clamp(6px, 1.2vw, 12px);
+    --button-size: min(24vw, 22vh);
+  }
+
+  .topbar {
+    padding: 8px 14px;
+  }
+
+  .title-block h1 {
+    font-size: clamp(13px, 2vw, 18px);
+  }
+
+  /* Subtitle not needed while driving */
+  .title-block p {
+    display: none;
+  }
+
+  .status-block {
+    gap: 6px;
+  }
+
+  .status-pill {
+    padding: 5px 10px;
+    font-size: 12px;
+  }
+
+  .mini-status-grid {
+    gap: 5px;
+  }
+
+  .mini-status-grid > div {
+    padding: 5px 8px;
+  }
+
+  .action-block {
+    gap: 6px;
+  }
+
+  .top-button {
+    padding: 7px 12px;
+    min-width: 96px;
+    font-size: 12px;
+    border-radius: 12px;
+  }
+
+  .panel {
+    padding: clamp(8px, 1.2vw, 12px);
+  }
+
+  .panel-heading {
+    margin-bottom: 8px;
+    font-size: 10px;
+  }
+
+  /* FIX: hide informational boxes in compact mode — only the error-box
+     (different class) remains visible so alerts are never suppressed */
+  .summary-box {
+    display: none;
+  }
+
+  .car-visual {
+    width: min(64px, 52%);
+    font-size: clamp(28px, 3.8vw, 40px);
+  }
+
+  /* Re-centre the car visual now that summary boxes are hidden */
+  .center-panel {
+    align-content: center;
+    gap: 6px;
+  }
+}
