@@ -75,14 +75,22 @@ button {
   align-items: center;
   gap: var(--gap);
   padding: 10px 16px;
+  /* Allow the topbar to reflow into two rows before mini-cell labels overflow.
+     Without this the bar is a rigid single row that silently clips content. */
+  flex-wrap: wrap;
 }
 
-/* Status block fills the remaining width between the pill and the buttons */
+/* Status block fills the remaining width between the pill and the buttons.
+   flex-basis 440px is the wrap trigger: "COMMAND" (widest label) at 10 px
+   uppercase + letter-spacing needs ~46 px; each mini-cell minimum = 46 + 20 px
+   padding = 66 px; 4 cells + 3×6 px gaps = 282 px for the grid; add pill
+   (~130 px) + 10 px gap = ~422 px minimum before overflow. 440 px gives ~18 px
+   of headroom so the bar reflows cleanly before any label is clipped. */
 .status-block {
   display: flex;
   align-items: center;
   gap: 10px;
-  flex: 1;
+  flex: 1 1 440px;
   min-width: 0;
 }
 
@@ -148,6 +156,11 @@ button {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  /* Safety net: clip label text if a cell is ever narrower than its content
+     (mirrors the overflow handling already present on .value) */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .value {
@@ -159,12 +172,16 @@ button {
   white-space: nowrap;
 }
 
-/* Buttons sit in a horizontal row, flush to the right */
+/* Buttons sit in a horizontal row, flush to the right.
+   margin-left: auto is a no-op when action-block shares a row with status-block
+   (status-block's flex-grow already pushes it right), but when the bar wraps
+   to two rows and action-block is alone on row 2, auto-margin right-aligns it. */
 .action-block {
   display: flex;
   flex-direction: row;
   gap: 8px;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 .top-button {
@@ -229,16 +246,19 @@ button {
 }
 
 .steering-grid {
-  grid-template-columns: var(--button-size) var(--button-size);
+  /* minmax(0, --button-size) lets columns shrink below --button-size when
+     the panel is too narrow, preventing horizontal overflow */
+  grid-template-columns: minmax(0, var(--button-size)) minmax(0, var(--button-size));
 }
 
-/* FIX: throttle buttons now sit side by side (horizontal), same as steering */
 .throttle-grid {
-  grid-template-columns: var(--button-size) var(--button-size);
+  grid-template-columns: minmax(0, var(--button-size)) minmax(0, var(--button-size));
 }
 
 .drive-button {
-  width: var(--button-size);
+  /* Fill the grid cell width (which is now capped at --button-size) instead
+     of a rigid fixed width that could exceed the available panel space */
+  width: 100%;
   height: var(--button-size);
   border-radius: 28px;
   border: 1px solid rgba(148, 163, 184, 0.18);
@@ -253,17 +273,28 @@ button {
   text-align: center;
   touch-action: none;
   transition: transform 100ms ease, border-color 100ms ease, background 100ms ease;
+  /* Clip any content that still overflows when the button is very small */
+  overflow: hidden;
 }
 
 .drive-button .arrow {
-  font-size: clamp(28px, 4.5vw, 46px);
+  /* Scale with both viewport width AND height so the icon shrinks when the
+     button's height is constrained by a small vh value */
+  font-size: clamp(12px, min(4.5vw, 6vh), 46px);
   line-height: 1;
 }
 
 .drive-button .text {
-  font-size: clamp(13px, 1.8vw, 20px);
+  /* Same dual-axis scaling: min(vw, vh) keeps the label inside the button
+     when height is the binding constraint */
+  font-size: clamp(8px, min(1.8vw, 2.5vh), 20px);
   font-weight: 800;
   letter-spacing: 0.04em;
+  /* Prevent the label from wrapping or bleeding outside its button */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .drive-button.active {
@@ -409,6 +440,15 @@ button {
 
   .topbar {
     padding: 7px 14px;
+    /* Single-row in compact landscape: vertical space is precious, so suppress
+       wrapping and let the status-block shrink freely (2×2 grid + pill-text-hide
+       at ≤640 px keep cells readable even when compressed). */
+    flex-wrap: nowrap;
+  }
+
+  .status-block {
+    /* Override the 440 px flex-basis so the block can shrink in a single row */
+    flex: 1 1 0;
   }
 
   .status-pill {
