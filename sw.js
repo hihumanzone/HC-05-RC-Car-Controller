@@ -1,4 +1,4 @@
-const CACHE_NAME = 'hc05-rc-pwa-v1';
+const CACHE_NAME = 'hc05-rc-pwa-v2';
 const APP_SHELL = [
   './',
   './index.html',

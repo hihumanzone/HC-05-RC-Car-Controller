@@ -1,6 +1,8 @@
 const SPP_UUID = '00001101-0000-1000-8000-00805f9b34fb';
 const COMMAND_INTERVAL_MS = 120;
-const SW_CACHE_NAME = 'hc05-rc-pwa-v1';
+const SENSOR_STALE_MS = 2500;
+const OBSTACLE_STOP_CM = 20;
+const SW_CACHE_NAME = 'hc05-rc-pwa-v2';
 
 const BIT_FORWARD = 1;
 const BIT_BACKWARD = 2;
@@ -37,6 +39,7 @@ let commandTimer = null;
 let lastSentMask = null;
 let intentionallyDisconnecting = false;
 let deferredInstallPrompt = null;
+let lastSensorUpdateTime = 0;
 
 const statusText = document.getElementById('statusText');
 const statusDot = document.getElementById('statusDot');
@@ -48,6 +51,10 @@ const errorBox = document.getElementById('errorBox');
 const connectBtn = document.getElementById('connectBtn');
 const disconnectBtn = document.getElementById('disconnectBtn');
 const installBtn = document.getElementById('installBtn');
+const sensorCard = document.getElementById('sensorCard');
+const frontDistance = document.getElementById('frontDistance');
+const rearDistance = document.getElementById('rearDistance');
+const sensorStatus = document.getElementById('sensorStatus');
 const driveButtons = Array.from(document.querySelectorAll('.drive-button'));
 
 initialize();
@@ -58,6 +65,7 @@ async function initialize() {
   await registerServiceWorker();
   detectSerialSupport();
   await checkForPreviouslyGrantedPorts();
+  setInterval(markSensorsStaleIfNeeded, 1000);
 }
 
 function registerUiEvents() {
@@ -312,6 +320,7 @@ async function connectToCar() {
 
     readFromArduino();
     await sendCurrentState(true);
+    await requestSensorStatus();
   } catch (error) {
     await safeResetConnectionState();
     if (error && error.name === 'NotFoundError') {
@@ -435,11 +444,27 @@ async function readFromArduino() {
 }
 
 function handleArduinoMessage(message) {
+  if (message.startsWith('DIST:')) {
+    updateSensorReadings(message);
+    return;
+  }
+
+  if (message.startsWith('OBSTACLE:')) {
+    handleObstacleMessage(message);
+    return;
+  }
+
   arduinoMessage.textContent = message;
 
   if (message === 'READY') {
     setStatus('Connected', 'connected');
     clearError();
+    return;
+  }
+
+  if (message === 'SENSORS:ULTRASONIC_READY') {
+    sensorStatus.textContent = 'Sensors ready';
+    sensorCard.classList.remove('warning', 'stale');
     return;
   }
 
@@ -449,14 +474,124 @@ function handleArduinoMessage(message) {
     sendCurrentState(true);
     updatePressedStyles();
     updateCommandLabel();
-    setStatus('Safety stop', 'error');
-    showError('Safety auto-stop triggered after 3 seconds. Release all buttons, then press again to continue.');
+    showError('Safety auto-stop triggered after 3 seconds. Release all buttons, then press again to continue.', 'Safety stop');
     return;
   }
 
   if (message === 'UNLOCKED') {
     clearError();
     setStatus('Connected', 'connected');
+  }
+}
+
+function updateSensorReadings(message) {
+  const match = message.match(/^DIST:F=([^,]+),R=(.+)$/);
+  if (!match) {
+    return;
+  }
+
+  const frontCm = parseDistanceCm(match[1]);
+  const rearCm = parseDistanceCm(match[2]);
+  frontDistance.textContent = formatDistance(frontCm);
+  rearDistance.textContent = formatDistance(rearCm);
+  lastSensorUpdateTime = Date.now();
+
+  sensorCard.classList.remove('stale');
+
+  const frontClose = frontCm !== null && frontCm <= OBSTACLE_STOP_CM;
+  const rearClose = rearCm !== null && rearCm <= OBSTACLE_STOP_CM;
+  sensorCard.classList.toggle('warning', frontClose || rearClose);
+
+  if (frontClose && rearClose) {
+    sensorStatus.textContent = 'Front and rear obstacles detected';
+  } else if (frontClose) {
+    sensorStatus.textContent = 'Front obstacle detected';
+  } else if (rearClose) {
+    sensorStatus.textContent = 'Rear obstacle detected';
+  } else if (frontCm === null && rearCm === null) {
+    sensorStatus.textContent = 'No valid distance reading yet';
+  } else {
+    sensorStatus.textContent = 'Path clear';
+  }
+}
+
+function parseDistanceCm(value) {
+  const trimmed = value.trim();
+  if (trimmed === '--') {
+    return null;
+  }
+
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function formatDistance(distanceCm) {
+  return distanceCm === null ? '--' : `${distanceCm} cm`;
+}
+
+function handleObstacleMessage(message) {
+  arduinoMessage.textContent = message;
+  const direction = message.split(':')[1] || '';
+
+  if (direction === 'CLEAR') {
+    sensorCard.classList.remove('warning');
+    sensorStatus.textContent = 'Path clear';
+    clearError();
+    setStatus('Connected', 'connected');
+    return;
+  }
+
+  clearAllControls();
+  stopHeartbeat();
+  sendCurrentState(true);
+
+  sensorCard.classList.add('warning');
+  const readableDirection = obstacleDirectionLabel(direction);
+  sensorStatus.textContent = `${readableDirection} obstacle detected`;
+  showError(`${readableDirection} obstacle detected. Motors stopped; steer away or reverse when clear.`, 'Obstacle stop');
+}
+
+function obstacleDirectionLabel(direction) {
+  switch (direction) {
+    case 'FRONT':
+      return 'Front';
+    case 'REAR':
+      return 'Rear';
+    case 'BOTH':
+      return 'Front and rear';
+    default:
+      return 'Ultrasonic';
+  }
+}
+
+function markSensorsStaleIfNeeded() {
+  if (!lastSensorUpdateTime) {
+    return;
+  }
+
+  if (Date.now() - lastSensorUpdateTime <= SENSOR_STALE_MS) {
+    return;
+  }
+
+  sensorCard.classList.add('stale');
+  if (!sensorCard.classList.contains('warning')) {
+    sensorStatus.textContent = 'Sensor telemetry paused';
+  }
+}
+
+async function requestSensorStatus() {
+  if (!writer) {
+    return;
+  }
+
+  try {
+    await writer.write(new TextEncoder().encode('SENSOR?\n'));
+  } catch (error) {
+    console.warn('Sensor status request failed:', error);
   }
 }
 
@@ -573,10 +708,10 @@ function formatError(error) {
   return error && error.message ? error.message : String(error);
 }
 
-function showError(message) {
+function showError(message, statusLabel = 'Error') {
   errorBox.textContent = message;
   errorBox.classList.add('show');
-  statusText.textContent = 'Error';
+  statusText.textContent = statusLabel;
   statusDot.className = 'dot error';
 }
 

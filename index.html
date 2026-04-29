@@ -55,6 +55,20 @@
 
       <section class="panel card center-panel">
         <div class="car-visual" aria-hidden="true">🚗</div>
+        <div id="sensorCard" class="sensor-card" aria-live="polite">
+          <div class="sensor-title">Ultrasonic sensors</div>
+          <div class="sensor-grid">
+            <div class="sensor-reading">
+              <span class="label">Front</span>
+              <span id="frontDistance" class="value">--</span>
+            </div>
+            <div class="sensor-reading">
+              <span class="label">Rear</span>
+              <span id="rearDistance" class="value">--</span>
+            </div>
+          </div>
+          <div id="sensorStatus" class="sensor-status">Waiting for sensor readings</div>
+        </div>
         <div class="summary-box">
           <strong>Drive:</strong> press and hold to move, release to stop immediately.
         </div>
