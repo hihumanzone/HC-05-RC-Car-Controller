@@ -2,7 +2,7 @@ const SPP_UUID = '00001101-0000-1000-8000-00805f9b34fb';
 const COMMAND_INTERVAL_MS = 120;
 const SENSOR_STALE_MS = 2500;
 const OBSTACLE_STOP_CM = 20;
-const APP_VERSION = '2026.04.29-cache-fix.1';
+const APP_VERSION = '2026.04.29-front-sensor.1';
 
 const BIT_FORWARD = 1;
 const BIT_BACKWARD = 2;
@@ -53,7 +53,6 @@ const disconnectBtn = document.getElementById('disconnectBtn');
 const installBtn = document.getElementById('installBtn');
 const sensorCard = document.getElementById('sensorCard');
 const frontDistance = document.getElementById('frontDistance');
-const rearDistance = document.getElementById('rearDistance');
 const sensorStatus = document.getElementById('sensorStatus');
 const driveButtons = Array.from(document.querySelectorAll('.drive-button'));
 
@@ -538,8 +537,8 @@ function handleArduinoMessage(message) {
     return;
   }
 
-  if (message === 'SENSORS:ULTRASONIC_READY') {
-    sensorStatus.textContent = 'Sensors ready';
+  if (message === 'SENSORS:FRONT_ULTRASONIC_READY' || message === 'SENSORS:ULTRASONIC_READY') {
+    sensorStatus.textContent = 'Front sensor ready';
     sensorCard.classList.remove('warning', 'stale');
     return;
   }
@@ -561,33 +560,28 @@ function handleArduinoMessage(message) {
 }
 
 function updateSensorReadings(message) {
-  const match = message.match(/^DIST:F=([^,]+),R=(.+)$/);
+  // Front-only firmware sends DIST:F=<cm>. The optional ,R=... part is accepted
+  // so the web app still understands older two-sensor firmware if it is flashed.
+  const match = message.match(/^DIST:F=([^,]+)(?:,R=(.+))?$/);
   if (!match) {
     return;
   }
 
   const frontCm = parseDistanceCm(match[1]);
-  const rearCm = parseDistanceCm(match[2]);
   frontDistance.textContent = formatDistance(frontCm);
-  rearDistance.textContent = formatDistance(rearCm);
   lastSensorUpdateTime = Date.now();
 
   sensorCard.classList.remove('stale');
 
   const frontClose = frontCm !== null && frontCm <= OBSTACLE_STOP_CM;
-  const rearClose = rearCm !== null && rearCm <= OBSTACLE_STOP_CM;
-  sensorCard.classList.toggle('warning', frontClose || rearClose);
+  sensorCard.classList.toggle('warning', frontClose);
 
-  if (frontClose && rearClose) {
-    sensorStatus.textContent = 'Front and rear obstacles detected';
-  } else if (frontClose) {
+  if (frontClose) {
     sensorStatus.textContent = 'Front obstacle detected';
-  } else if (rearClose) {
-    sensorStatus.textContent = 'Rear obstacle detected';
-  } else if (frontCm === null && rearCm === null) {
-    sensorStatus.textContent = 'No valid distance reading yet';
+  } else if (frontCm === null) {
+    sensorStatus.textContent = 'No valid front distance reading yet';
   } else {
-    sensorStatus.textContent = 'Path clear';
+    sensorStatus.textContent = 'Path ahead clear';
   }
 }
 
@@ -615,7 +609,7 @@ function handleObstacleMessage(message) {
 
   if (direction === 'CLEAR') {
     sensorCard.classList.remove('warning');
-    sensorStatus.textContent = 'Path clear';
+    sensorStatus.textContent = 'Path ahead clear';
     clearError();
     setStatus('Connected', 'connected');
     return;
@@ -628,17 +622,13 @@ function handleObstacleMessage(message) {
   sensorCard.classList.add('warning');
   const readableDirection = obstacleDirectionLabel(direction);
   sensorStatus.textContent = `${readableDirection} obstacle detected`;
-  showError(`${readableDirection} obstacle detected. Motors stopped; steer away or reverse when clear.`, 'Obstacle stop');
+  showError(`${readableDirection} obstacle detected. Motors stopped; reverse or steer away until the front path is clear.`, 'Obstacle stop');
 }
 
 function obstacleDirectionLabel(direction) {
   switch (direction) {
     case 'FRONT':
       return 'Front';
-    case 'REAR':
-      return 'Rear';
-    case 'BOTH':
-      return 'Front and rear';
     default:
       return 'Ultrasonic';
   }
@@ -655,7 +645,7 @@ function markSensorsStaleIfNeeded() {
 
   sensorCard.classList.add('stale');
   if (!sensorCard.classList.contains('warning')) {
-    sensorStatus.textContent = 'Sensor telemetry paused';
+    sensorStatus.textContent = 'Front sensor telemetry paused';
   }
 }
 

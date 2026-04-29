@@ -13,12 +13,10 @@ const byte IN4 = 5;
 const byte ENA = 6;
 const byte ENB = 9;
 
-// HC-SR04 / ultrasonic sensor pins.
+// Front HC-SR04 / ultrasonic sensor pins.
 // Analog pins are used as digital pins so the motor, PWM, and HC-05 pins stay free.
 const byte FRONT_TRIG_PIN = A0;
 const byte FRONT_ECHO_PIN = A1;
-const byte REAR_TRIG_PIN  = A2;
-const byte REAR_ECHO_PIN  = A3;
 
 // Speed settings
 const byte DRIVE_SPEED = 200;
@@ -30,8 +28,6 @@ const unsigned long COMMAND_LOSS_TIMEOUT_MS = 350;
 
 // Ultrasonic settings
 const bool ULTRASONIC_ENABLED = true;
-const bool FRONT_ULTRASONIC_ENABLED = true;
-const bool REAR_ULTRASONIC_ENABLED = true;
 const unsigned int OBSTACLE_STOP_CM = 20;
 const unsigned int OBSTACLE_CLEAR_CM = 28;
 const unsigned int DISTANCE_INVALID_CM = 999;
@@ -51,7 +47,7 @@ const unsigned long TELEMETRY_INTERVAL_MS = 500;
 // 8 = Right
 //
 // Extra command:
-// SENSOR? = immediately prints the latest ultrasonic telemetry
+// SENSOR? = immediately prints the latest front ultrasonic telemetry
 const byte BIT_FORWARD  = 1;
 const byte BIT_BACKWARD = 2;
 const byte BIT_LEFT     = 4;
@@ -70,16 +66,11 @@ unsigned long motionStartTime = 0;
 unsigned long lastCommandTime = 0;
 
 unsigned int frontDistanceCm = DISTANCE_INVALID_CM;
-unsigned int rearDistanceCm = DISTANCE_INVALID_CM;
 unsigned long lastFrontValidTime = 0;
-unsigned long lastRearValidTime = 0;
 unsigned long lastUltrasonicReadTime = 0;
 unsigned long lastTelemetryTime = 0;
-bool readFrontNext = true;
 bool frontObstacle = false;
-bool rearObstacle = false;
 bool lastReportedFrontObstacle = false;
-bool lastReportedRearObstacle = false;
 
 // --------------------------------------------------
 // Function declarations for ArduinoDroid compatibility
@@ -121,10 +112,7 @@ void setup() {
   if (ULTRASONIC_ENABLED) {
     pinMode(FRONT_TRIG_PIN, OUTPUT);
     pinMode(FRONT_ECHO_PIN, INPUT);
-    pinMode(REAR_TRIG_PIN, OUTPUT);
-    pinMode(REAR_ECHO_PIN, INPUT);
     digitalWrite(FRONT_TRIG_PIN, LOW);
-    digitalWrite(REAR_TRIG_PIN, LOW);
   }
 
   Serial.begin(9600);
@@ -134,14 +122,14 @@ void setup() {
 
   BT.println("READY");
   if (ULTRASONIC_ENABLED) {
-    BT.println("SENSORS:ULTRASONIC_READY");
+    BT.println("SENSORS:FRONT_ULTRASONIC_READY");
     sendDistanceTelemetry(true);
   }
 
   if (DEBUG_SERIAL) {
     Serial.println("READY");
     if (ULTRASONIC_ENABLED) {
-      Serial.println("SENSORS:ULTRASONIC_READY");
+      Serial.println("SENSORS:FRONT_ULTRASONIC_READY");
     }
   }
 }
@@ -262,9 +250,9 @@ void updateDriveControl() {
     return;
   }
 
-  // Ultrasonic obstacle lockout. Forward motion is blocked by the front sensor,
-  // reverse motion is blocked by the rear sensor. Spin/turn-only commands remain
-  // available so the car can be steered away from an obstacle.
+  // Front ultrasonic obstacle lockout. Forward motion is blocked by the front
+  // sensor. Reverse and spin/turn-only commands remain available so the car
+  // can be backed or steered away from an obstacle.
   if (movementBlockedByObstacle(currentMask)) {
     stopMotors();
     resetMotionTimer();
@@ -401,19 +389,9 @@ void updateUltrasonicSensors() {
   }
   lastUltrasonicReadTime = now;
 
-  if (readFrontNext) {
-    if (FRONT_ULTRASONIC_ENABLED) {
-      unsigned int rawFront = readUltrasonicCm(FRONT_TRIG_PIN, FRONT_ECHO_PIN);
-      updateDistanceCm(frontDistanceCm, lastFrontValidTime, rawFront);
-    }
-  } else {
-    if (REAR_ULTRASONIC_ENABLED) {
-      unsigned int rawRear = readUltrasonicCm(REAR_TRIG_PIN, REAR_ECHO_PIN);
-      updateDistanceCm(rearDistanceCm, lastRearValidTime, rawRear);
-    }
-  }
+  unsigned int rawFront = readUltrasonicCm(FRONT_TRIG_PIN, FRONT_ECHO_PIN);
+  updateDistanceCm(frontDistanceCm, lastFrontValidTime, rawFront);
 
-  readFrontNext = !readFrontNext;
   updateObstacleFlags();
   sendDistanceTelemetry(false);
 }
@@ -462,12 +440,10 @@ void updateDistanceCm(unsigned int &storedDistance, unsigned long &lastValidTime
 
 void updateObstacleFlags() {
   bool oldFrontObstacle = frontObstacle;
-  bool oldRearObstacle = rearObstacle;
 
-  frontObstacle = FRONT_ULTRASONIC_ENABLED && obstacleStateForDistance(frontObstacle, frontDistanceCm);
-  rearObstacle = REAR_ULTRASONIC_ENABLED && obstacleStateForDistance(rearObstacle, rearDistanceCm);
+  frontObstacle = obstacleStateForDistance(frontObstacle, frontDistanceCm);
 
-  if (frontObstacle != oldFrontObstacle || rearObstacle != oldRearObstacle) {
+  if (frontObstacle != oldFrontObstacle) {
     sendObstacleEvents(false);
   }
 }
@@ -492,10 +468,6 @@ bool movementBlockedByObstacle(byte mask) {
     return true;
   }
 
-  if (backward && !forward && rearObstacle) {
-    return true;
-  }
-
   return false;
 }
 
@@ -512,8 +484,6 @@ void sendDistanceTelemetry(bool forceSend) {
 
   BT.print("DIST:F=");
   printDistanceValue(frontDistanceCm);
-  BT.print(",R=");
-  printDistanceValue(rearDistanceCm);
   BT.println();
 
   if (DEBUG_SERIAL) {
@@ -522,12 +492,6 @@ void sendDistanceTelemetry(bool forceSend) {
       Serial.print("--");
     } else {
       Serial.print(frontDistanceCm);
-    }
-    Serial.print(",R=");
-    if (rearDistanceCm == DISTANCE_INVALID_CM) {
-      Serial.print("--");
-    } else {
-      Serial.print(rearDistanceCm);
     }
     Serial.println();
   }
@@ -538,22 +502,17 @@ void sendObstacleEvents(bool forceSend) {
     return;
   }
 
-  if (!forceSend && frontObstacle == lastReportedFrontObstacle && rearObstacle == lastReportedRearObstacle) {
+  if (!forceSend && frontObstacle == lastReportedFrontObstacle) {
     return;
   }
 
-  if (frontObstacle && rearObstacle) {
-    BT.println("OBSTACLE:BOTH");
-  } else if (frontObstacle) {
+  if (frontObstacle) {
     BT.println("OBSTACLE:FRONT");
-  } else if (rearObstacle) {
-    BT.println("OBSTACLE:REAR");
   } else {
     BT.println("OBSTACLE:CLEAR");
   }
 
   lastReportedFrontObstacle = frontObstacle;
-  lastReportedRearObstacle = rearObstacle;
 }
 
 void printDistanceValue(unsigned int distanceCm) {

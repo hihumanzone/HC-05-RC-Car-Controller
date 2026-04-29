@@ -370,8 +370,12 @@ button {
 
 .sensor-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 8px;
+}
+
+.sensor-grid.single-sensor .sensor-reading {
+  text-align: center;
 }
 
 .sensor-reading {

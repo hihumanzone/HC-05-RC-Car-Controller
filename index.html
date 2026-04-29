@@ -12,10 +12,10 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <link rel="manifest" href="./manifest.webmanifest?v=20260429-cachefix1" />
+  <link rel="manifest" href="./manifest.webmanifest?v=20260429-frontsensor1" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png" />
-  <link rel="stylesheet" href="./styles.css?v=20260429-cachefix1" />
+  <link rel="stylesheet" href="./styles.css?v=20260429-frontsensor1" />
   <title>HC-05 RC Car Controller</title>
 </head>
 <body>
@@ -59,15 +59,11 @@
       <section class="panel card center-panel">
         <div class="car-visual" aria-hidden="true">🚗</div>
         <div id="sensorCard" class="sensor-card" aria-live="polite">
-          <div class="sensor-title">Ultrasonic sensors</div>
-          <div class="sensor-grid">
+          <div class="sensor-title">Front ultrasonic sensor</div>
+          <div class="sensor-grid single-sensor">
             <div class="sensor-reading">
               <span class="label">Front</span>
               <span id="frontDistance" class="value">--</span>
-            </div>
-            <div class="sensor-reading">
-              <span class="label">Rear</span>
-              <span id="rearDistance" class="value">--</span>
             </div>
           </div>
           <div id="sensorStatus" class="sensor-status">Waiting for sensor readings</div>
@@ -110,6 +106,6 @@
     </div>
   </div>
 
-  <script src="./app.js?v=20260429-cachefix1"></script>
+  <script src="./app.js?v=20260429-frontsensor1"></script>
 </body>
 </html>

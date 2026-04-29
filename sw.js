@@ -1,4 +1,4 @@
-const CACHE_VERSION = '2026-04-29-cache-fix-v3';
+const CACHE_VERSION = '2026-04-29-front-sensor-v1';
 const CACHE_NAME = `hc05-rc-pwa-${CACHE_VERSION}`;
 const APP_SHELL = [
   './',

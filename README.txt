@@ -25,7 +25,7 @@ Hardware
 - Jumper wires
 - Wheels
 - Caster wheel
-- 2 HC-SR04-compatible ultrasonic sensors, recommended as front and rear sensors
+- 1 HC-SR04-compatible ultrasonic sensor mounted at the front
 
 Wiring
 ------
@@ -54,20 +54,16 @@ L298N enable pins, PWM version:
 - Remove the ENA and ENB jumper caps from the L298N
 - Use hc05_rc_car.ino
 
-Ultrasonic sensors to Arduino Uno:
+Front ultrasonic sensor to Arduino Uno:
 - Front sensor VCC  -> Arduino 5V
 - Front sensor GND  -> Arduino GND
 - Front sensor TRIG -> Arduino A0
 - Front sensor ECHO -> Arduino A1
-- Rear sensor VCC   -> Arduino 5V
-- Rear sensor GND   -> Arduino GND
-- Rear sensor TRIG  -> Arduino A2
-- Rear sensor ECHO  -> Arduino A3
 
 Notes for ultrasonic wiring:
-- A0 to A3 are used as digital pins.
-- Keep the front and rear sensors aimed away from each other to reduce echo crosstalk.
-- If you use a 3.3V microcontroller instead of an Arduino Uno, level-shift the ECHO pins.
+- A0 and A1 are used as digital pins.
+- Mount the sensor facing forward, with a clear view in front of the car.
+- If you use a 3.3V microcontroller instead of an Arduino Uno, level-shift the ECHO pin.
 
 Motors to L298N:
 - Left motor  -> OUT1 and OUT2
@@ -83,7 +79,6 @@ Common ground:
 - L298N GND
 - Battery -
 - Front ultrasonic GND
-- Rear ultrasonic GND
 
 All grounds must be connected together.
 
@@ -93,7 +88,7 @@ How to use
    - hc05_rc_car_no_ena_enb.ino if ENA and ENB jumpers stay installed.
    - hc05_rc_car.ino if ENA and ENB are connected to Arduino pins 6 and 9.
 2. Upload the chosen sketch to your Arduino Uno.
-3. Make the wiring shown above, including the ultrasonic sensors on A0 to A3.
+3. Wire the front ultrasonic sensor to A0 and A1 as shown above.
 4. Pair the HC-05 in Android Bluetooth settings.
 5. Serve this folder over HTTPS.
 
@@ -135,35 +130,31 @@ Examples:
 
 Extra command:
 
-- SENSOR? = Arduino immediately reports the latest ultrasonic readings and obstacle state.
+- SENSOR? = Arduino immediately reports the latest front ultrasonic reading and obstacle state.
 
 Arduino telemetry
 -----------------
-The Arduino now sends ultrasonic status lines over Bluetooth:
+The Arduino sends these status lines over Bluetooth:
 
 - READY
-- SENSORS:ULTRASONIC_READY
-- DIST:F=42,R=88
-- DIST:F=--,R=31
+- SENSORS:FRONT_ULTRASONIC_READY
+- DIST:F=42
+- DIST:F=--
 - OBSTACLE:FRONT
-- OBSTACLE:REAR
-- OBSTACLE:BOTH
 - OBSTACLE:CLEAR
 - SAFETY_LOCK
 - UNLOCKED
 
 Distance values are in centimeters. A value of -- means no valid reading is currently available.
 
-Ultrasonic behavior
--------------------
+Front ultrasonic behavior
+-------------------------
 - The front sensor blocks forward movement when an object is about 20 cm or closer.
-- The rear sensor blocks backward movement when an object is about 20 cm or closer.
 - Movement is allowed again after the distance rises above about 28 cm. This hysteresis prevents jitter near the threshold.
+- Reverse and spin/turn-only commands remain available so the car can be backed or steered away from an obstacle.
 - Sensor values are filtered in code to reduce HC-SR04 noise.
-- The code reads one sensor at a time to reduce crosstalk and keep Bluetooth commands responsive.
-- The web controller displays live front and rear distances.
-- If an obstacle is detected, the web controller clears held buttons, sends a stop command, and shows an obstacle warning.
-- Spin/turn-only commands remain available so the car can be steered away from an obstacle.
+- The web controller displays the live front distance.
+- If a front obstacle is detected, the web controller clears held buttons, sends a stop command, and shows an obstacle warning.
 
 Behavior
 --------
@@ -173,16 +164,40 @@ Behavior
 - The Arduino stops automatically after 3 seconds as a safety limit.
 - After the 3-second safety stop, release all buttons before moving again.
 - The web app repeats the current STATE while buttons are held so control stays reliable.
-- Ultrasonic obstacle stops are separate from the 3-second safety stop.
+- Front ultrasonic obstacle stops are separate from the 3-second safety stop.
 
 Tuning
 ------
 Open the Arduino sketch and adjust these constants if needed:
 
-- OBSTACLE_STOP_CM: distance at or below which movement is blocked. Default: 20.
-- OBSTACLE_CLEAR_CM: distance at which the obstacle is considered clear. Default: 28.
+- OBSTACLE_STOP_CM: distance at or below which forward movement is blocked. Default: 20.
+- OBSTACLE_CLEAR_CM: distance at which the front obstacle is considered clear. Default: 28.
 - ULTRASONIC_MAX_CM: maximum distance to measure. Default: 200.
-- TELEMETRY_INTERVAL_MS: how often distance data is sent to the web app. Default: 500.
+- TELEMETRY_INTERVAL_MS: how often front distance data is sent to the web app. Default: 500.
+
+Website update behavior
+-----------------------
+This version keeps the stale PWA cache fix so clients receive website updates more reliably.
+
+What changed:
+- The service worker uses a network-first strategy for index.html, app.js, styles.css, and the manifest.
+- When the phone is online, refresh checks the server first and saves the newest files.
+- When the phone is offline, the last cached controller still opens.
+- Old service-worker caches are deleted automatically when the updated service worker activates.
+- app.js registers the service worker with updateViaCache: 'none', checks for a newer service worker on startup, and checks again every hour while the page stays open.
+- If a new service worker is installed while an already-controlled page is open, the app reloads once so the client gets the new version.
+- index.html uses version query strings on app.js, styles.css, and the manifest to avoid browser HTTP-cache reuse.
+
+Force-refresh for already-stuck clients:
+If a phone is still stuck on an older cached copy, open the site once with this query at the end:
+
+?update=1
+
+Example:
+
+https://your-site.example/index.html?update=1
+
+That clears this site's service-worker caches, unregisters the old service worker, removes the update query, and reloads the page cleanly.
 
 Notes
 -----
