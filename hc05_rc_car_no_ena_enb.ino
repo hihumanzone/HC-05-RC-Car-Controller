@@ -57,6 +57,32 @@ enum DriveMode {
   MODE_SPIN_RIGHT
 };
 
+// --------------------------------------------------
+// Function declarations for ArduinoDroid compatibility
+// --------------------------------------------------
+void readBluetoothLines();
+void handleLine(const char *line);
+void updateDriveControl();
+
+DriveMode getDriveModeFromMask(byte mask);
+void applyDriveMode(DriveMode mode);
+
+void leftForward();
+void leftBackward();
+void leftStop();
+
+void rightForward();
+void rightBackward();
+void rightStop();
+
+void stopMotors();
+void resetMotionTimer();
+
+bool startsWith(const char *text, const char *prefix);
+
+// --------------------------------------------------
+// Setup
+// --------------------------------------------------
 void setup() {
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
@@ -67,6 +93,7 @@ void setup() {
   BT.begin(9600);
 
   stopMotors();
+
   BT.println("READY");
 
   if (DEBUG_SERIAL) {
@@ -74,11 +101,17 @@ void setup() {
   }
 }
 
+// --------------------------------------------------
+// Main loop
+// --------------------------------------------------
 void loop() {
   readBluetoothLines();
   updateDriveControl();
 }
 
+// --------------------------------------------------
+// Bluetooth input handling
+// --------------------------------------------------
 void readBluetoothLines() {
   while (BT.available() > 0) {
     char c = BT.read();
@@ -99,9 +132,10 @@ void readBluetoothLines() {
     }
 
     if (inputIndex < sizeof(inputBuffer) - 1) {
-      inputBuffer[inputIndex++] = c;
+      inputBuffer[inputIndex] = c;
+      inputIndex++;
     } else {
-      // Overflow protection: reset buffer
+      // Buffer overflow protection
       inputIndex = 0;
     }
   }
@@ -118,13 +152,19 @@ void handleLine(const char *line) {
   }
 
   int value = atoi(line + 6);
-  if (value < 0) value = 0;
-  if (value > 15) value = 15;
+
+  if (value < 0) {
+    value = 0;
+  }
+
+  if (value > 15) {
+    value = 15;
+  }
 
   currentMask = (byte)value;
   lastCommandTime = millis();
 
-  // Releasing all buttons unlocks the safety lock
+  // STATE:0 means all buttons released
   if (currentMask == 0) {
     if (safetyLocked) {
       safetyLocked = false;
@@ -140,21 +180,24 @@ void handleLine(const char *line) {
   }
 }
 
+// --------------------------------------------------
+// Driving and safety logic
+// --------------------------------------------------
 void updateDriveControl() {
-  // No buttons pressed -> stop
+  // No buttons pressed
   if (currentMask == 0) {
     stopMotors();
     resetMotionTimer();
     return;
   }
 
-  // After safety stop, remain stopped until all buttons are released
+  // After safety lock, stay stopped until STATE:0 is received
   if (safetyLocked) {
     stopMotors();
     return;
   }
 
-  // Communication lost -> stop
+  // If Bluetooth commands stop arriving, stop the car
   if (millis() - lastCommandTime > COMMAND_LOSS_TIMEOUT_MS) {
     currentMask = 0;
     stopMotors();
@@ -163,6 +206,7 @@ void updateDriveControl() {
     if (DEBUG_SERIAL) {
       Serial.println("COMMAND TIMEOUT");
     }
+
     return;
   }
 
@@ -177,15 +221,18 @@ void updateDriveControl() {
     stopMotors();
     motionActive = false;
     safetyLocked = true;
+
     BT.println("SAFETY_LOCK");
 
     if (DEBUG_SERIAL) {
       Serial.println("SAFETY_LOCK");
     }
+
     return;
   }
 
-  applyDriveMode(getDriveModeFromMask(currentMask));
+  DriveMode mode = getDriveModeFromMask(currentMask);
+  applyDriveMode(mode);
 }
 
 DriveMode getDriveModeFromMask(byte mask) {
@@ -194,30 +241,47 @@ DriveMode getDriveModeFromMask(byte mask) {
   bool left     = (mask & BIT_LEFT)     != 0;
   bool right    = (mask & BIT_RIGHT)    != 0;
 
-  // Conflicting throttle commands -> stop safely
+  // Forward + Backward together is unsafe/conflicting
   if (forward && backward) {
     return MODE_STOP;
   }
 
   // Forward combinations
   if (forward) {
-    if (left && !right)  return MODE_FORWARD_LEFT;
-    if (right && !left)  return MODE_FORWARD_RIGHT;
+    if (left && !right) {
+      return MODE_FORWARD_LEFT;
+    }
+
+    if (right && !left) {
+      return MODE_FORWARD_RIGHT;
+    }
+
     return MODE_FORWARD;
   }
 
   // Backward combinations
   if (backward) {
-    if (left && !right)  return MODE_BACKWARD_LEFT;
-    if (right && !left)  return MODE_BACKWARD_RIGHT;
+    if (left && !right) {
+      return MODE_BACKWARD_LEFT;
+    }
+
+    if (right && !left) {
+      return MODE_BACKWARD_RIGHT;
+    }
+
     return MODE_BACKWARD;
   }
 
-  // Spin in place
-  if (left && !right)  return MODE_SPIN_LEFT;
-  if (right && !left)  return MODE_SPIN_RIGHT;
+  // Left / Right only: spin in place
+  if (left && !right) {
+    return MODE_SPIN_LEFT;
+  }
 
-  // Left + Right together with no forward/backward -> stop
+  if (right && !left) {
+    return MODE_SPIN_RIGHT;
+  }
+
+  // Left + Right together with no forward/backward
   return MODE_STOP;
 }
 
@@ -270,9 +334,9 @@ void applyDriveMode(DriveMode mode) {
   }
 }
 
-// --------------------
+// --------------------------------------------------
 // Left motor helpers
-// --------------------
+// --------------------------------------------------
 void leftForward() {
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, LOW);
@@ -288,9 +352,9 @@ void leftStop() {
   digitalWrite(IN2, LOW);
 }
 
-// --------------------
+// --------------------------------------------------
 // Right motor helpers
-// --------------------
+// --------------------------------------------------
 void rightForward() {
   digitalWrite(IN3, HIGH);
   digitalWrite(IN4, LOW);
@@ -306,9 +370,9 @@ void rightStop() {
   digitalWrite(IN4, LOW);
 }
 
-// --------------------
-// Global motor control
-// --------------------
+// --------------------------------------------------
+// General helpers
+// --------------------------------------------------
 void stopMotors() {
   leftStop();
   rightStop();
@@ -321,9 +385,17 @@ void resetMotionTimer() {
 
 bool startsWith(const char *text, const char *prefix) {
   while (*prefix != '\0') {
-    if (*text++ != *prefix++) {
+    if (*text == '\0') {
       return false;
     }
+
+    if (*text != *prefix) {
+      return false;
+    }
+
+    text++;
+    prefix++;
   }
+
   return true;
 }
