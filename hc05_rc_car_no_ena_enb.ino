@@ -1,27 +1,29 @@
 #include <SoftwareSerial.h>
 
-// HC-05:
-// Arduino pin 10 = SoftwareSerial RX <- HC-05 TXD
-// Arduino pin 11 = SoftwareSerial TX -> HC-05 RXD
-SoftwareSerial BT(10, 11);
+SoftwareSerial BT(10, 11);  // HC-05 TX -> Arduino 10, HC-05 RX -> Arduino 11
 
 // L298N direction pins only
-// ENA and ENB are NOT connected to Arduino in this build.
-// Leave the ENA and ENB jumper caps installed on the L298N.
-const byte IN1 = 2;  // Left motor direction A
-const byte IN2 = 3;  // Left motor direction B
-const byte IN3 = 4;  // Right motor direction A
-const byte IN4 = 5;  // Right motor direction B
+const byte IN1 = 2;
+const byte IN2 = 3;
+const byte IN3 = 4;
+const byte IN4 = 5;
 
-// Web app command bits: STATE:<number>
-const byte BIT_FORWARD  = 1;
-const byte BIT_BACKWARD = 2;
-const byte BIT_LEFT     = 4;
-const byte BIT_RIGHT    = 8;
-
+// Safety timeout
 const unsigned long SAFETY_TIMEOUT_MS = 3000;
-const unsigned long SIGNAL_TIMEOUT_MS = 400;
+
+// Optional debug output
 const bool DEBUG_SERIAL = false;
+
+// Button states from Bluetooth
+bool forwardPressed  = false;
+bool backwardPressed = false;
+bool leftPressed     = false;
+bool rightPressed    = false;
+
+// Motion / safety state
+bool motionActive = false;
+bool safetyLocked = false;
+unsigned long motionStartTime = 0;
 
 enum DriveMode {
   MODE_STOP,
@@ -35,14 +37,11 @@ enum DriveMode {
   MODE_SPIN_RIGHT
 };
 
-byte currentMask = 0;
-bool safetyLocked = false;
-bool motionStarted = false;
-unsigned long motionStartTime = 0;
-unsigned long lastCommandTime = 0;
-
-char lineBuffer[24];
-byte lineLength = 0;
+enum MotorDirection {
+  MOTOR_STOP,
+  MOTOR_FORWARD,
+  MOTOR_BACKWARD
+};
 
 void setup() {
   pinMode(IN1, OUTPUT);
@@ -50,214 +49,177 @@ void setup() {
   pinMode(IN3, OUTPUT);
   pinMode(IN4, OUTPUT);
 
-  stopMotors();
-
   Serial.begin(9600);
   BT.begin(9600);
 
-  lastCommandTime = millis();
-  sendStatus("READY");
+  stopMotors();
 }
 
 void loop() {
-  readBluetoothMessages();
-  updateSafetyState();
-  applyCurrentDriveMode();
+  readBluetoothCommands();
+  updateDriveControl();
 }
 
-void readBluetoothMessages() {
+void readBluetoothCommands() {
   while (BT.available() > 0) {
-    char c = (char)BT.read();
+    char command = BT.read();
 
-    if (c == '\r') {
-      continue;
+    if (DEBUG_SERIAL) {
+      Serial.print("Received: ");
+      Serial.println(command);
     }
 
-    if (c == '\n') {
-      lineBuffer[lineLength] = '\0';
-      processLine(lineBuffer);
-      lineLength = 0;
-      continue;
-    }
-
-    if (lineLength < sizeof(lineBuffer) - 1) {
-      lineBuffer[lineLength++] = c;
-    } else {
-      // Reset if an invalid or too-long line arrives.
-      lineLength = 0;
-    }
+    handleBluetoothCommand(command);
   }
 }
 
-void processLine(const char* line) {
-  if (line[0] == '\0') {
-    return;
-  }
+void handleBluetoothCommand(char command) {
+  switch (command) {
+    // Button pressed
+    case 'F': forwardPressed  = true;  break;
+    case 'B': backwardPressed = true;  break;
+    case 'L': leftPressed     = true;  break;
+    case 'R': rightPressed    = true;  break;
 
-  if (DEBUG_SERIAL) {
-    Serial.print("RX: ");
-    Serial.println(line);
-  }
+    // Button released
+    case 'f': forwardPressed  = false; break;
+    case 'b': backwardPressed = false; break;
+    case 'l': leftPressed     = false; break;
+    case 'r': rightPressed    = false; break;
 
-  if (strncmp(line, "STATE:", 6) != 0) {
-    return;
-  }
+    // Optional extra stop commands
+    case 'S':
+    case 's':
+    case 'T':
+    case 't':
+      clearAllButtons();
+      break;
 
-  int maskValue = atoi(line + 6);
-  if (maskValue < 0) {
-    maskValue = 0;
-  }
-  if (maskValue > 15) {
-    maskValue = 15;
-  }
-
-  currentMask = (byte)maskValue;
-  lastCommandTime = millis();
-
-  if (currentMask == 0) {
-    resetSafetyLock();
-  }
-
-  if (DEBUG_SERIAL) {
-    Serial.print("Mask set to: ");
-    Serial.println(currentMask);
+    default:
+      // Ignore unknown characters
+      break;
   }
 }
 
-void updateSafetyState() {
-  unsigned long now = millis();
-
-  // If commands stop arriving while the car is moving, stop the car.
-  if (currentMask != 0 && now - lastCommandTime >= SIGNAL_TIMEOUT_MS) {
-    currentMask = 0;
-    resetSafetyLock();
+void updateDriveControl() {
+  // Release of all buttons resets everything
+  if (!anyButtonPressed()) {
     stopMotors();
-    sendStatus("SIGNAL_LOST_STOP");
+    resetMotionState();
     return;
   }
 
-  // When all buttons are released, reset the motion timer.
-  if (currentMask == 0) {
-    motionStarted = false;
-    return;
-  }
-
-  // Stay stopped after the 3-second cutoff until all buttons are released.
+  // After safety timeout, remain stopped until all buttons are released
   if (safetyLocked) {
+    stopMotors();
     return;
   }
 
-  if (!motionStarted) {
-    motionStarted = true;
-    motionStartTime = now;
+  DriveMode mode = getRequestedDriveMode();
+
+  // Conflicting or unclear input -> stop safely
+  if (mode == MODE_STOP) {
+    stopMotors();
+    motionActive = false;
+    return;
   }
 
-  if (now - motionStartTime >= SAFETY_TIMEOUT_MS) {
-    currentMask = 0;
-    motionStarted = false;
+  // Start safety timer only when actual motion starts
+  if (!motionActive) {
+    motionActive = true;
+    motionStartTime = millis();
+  }
+
+  // Enforce 3-second safety auto-stop
+  if (millis() - motionStartTime >= SAFETY_TIMEOUT_MS) {
+    stopMotors();
+    motionActive = false;
     safetyLocked = true;
-    stopMotors();
-    sendStatus("SAFETY_LOCK");
-  }
-}
 
-void applyCurrentDriveMode() {
-  if (safetyLocked || currentMask == 0) {
-    stopMotors();
+    if (DEBUG_SERIAL) {
+      Serial.println("Safety timeout triggered");
+    }
     return;
   }
 
-  DriveMode mode = getDriveModeFromMask(currentMask);
   applyDriveMode(mode);
 }
 
-DriveMode getDriveModeFromMask(byte mask) {
-  bool forwardPressed = (mask & BIT_FORWARD) != 0;
-  bool backwardPressed = (mask & BIT_BACKWARD) != 0;
-  bool leftPressed = (mask & BIT_LEFT) != 0;
-  bool rightPressed = (mask & BIT_RIGHT) != 0;
-
-  // Conflicting commands -> stop safely.
+DriveMode getRequestedDriveMode() {
+  // Conflicting forward/backward -> stop
   if (forwardPressed && backwardPressed) {
     return MODE_STOP;
   }
 
-  if (!forwardPressed && !backwardPressed && leftPressed && rightPressed) {
-    return MODE_STOP;
-  }
-
+  // Forward combinations
   if (forwardPressed) {
-    if (leftPressed && !rightPressed) {
-      return MODE_FORWARD_LEFT;
-    }
-    if (rightPressed && !leftPressed) {
-      return MODE_FORWARD_RIGHT;
-    }
-    return MODE_FORWARD;
+    if (leftPressed && !rightPressed)  return MODE_FORWARD_LEFT;
+    if (rightPressed && !leftPressed)  return MODE_FORWARD_RIGHT;
+    if (!leftPressed && !rightPressed) return MODE_FORWARD;
+    return MODE_FORWARD; // left + right together cancel steering
   }
 
+  // Backward combinations
   if (backwardPressed) {
-    if (leftPressed && !rightPressed) {
-      return MODE_BACKWARD_LEFT;
-    }
-    if (rightPressed && !leftPressed) {
-      return MODE_BACKWARD_RIGHT;
-    }
-    return MODE_BACKWARD;
+    if (leftPressed && !rightPressed)  return MODE_BACKWARD_LEFT;
+    if (rightPressed && !leftPressed)  return MODE_BACKWARD_RIGHT;
+    if (!leftPressed && !rightPressed) return MODE_BACKWARD;
+    return MODE_BACKWARD; // left + right together cancel steering
   }
 
-  if (leftPressed && !rightPressed) {
-    return MODE_SPIN_LEFT;
-  }
+  // Spin in place only when no forward/backward is pressed
+  if (leftPressed && !rightPressed)  return MODE_SPIN_LEFT;
+  if (rightPressed && !leftPressed)  return MODE_SPIN_RIGHT;
 
-  if (rightPressed && !leftPressed) {
-    return MODE_SPIN_RIGHT;
-  }
-
+  // Left + right together with no drive direction -> stop
   return MODE_STOP;
 }
 
 void applyDriveMode(DriveMode mode) {
   switch (mode) {
     case MODE_FORWARD:
-      leftMotorForward();
-      rightMotorForward();
+      setLeftMotor(MOTOR_FORWARD);
+      setRightMotor(MOTOR_FORWARD);
       break;
 
     case MODE_BACKWARD:
-      leftMotorBackward();
-      rightMotorBackward();
+      setLeftMotor(MOTOR_BACKWARD);
+      setRightMotor(MOTOR_BACKWARD);
       break;
 
     case MODE_FORWARD_LEFT:
-      // No PWM available, so turn by stopping the inner wheel.
-      leftMotorStop();
-      rightMotorForward();
+      // Simple turn without PWM:
+      // left motor stopped, right motor forward
+      setLeftMotor(MOTOR_STOP);
+      setRightMotor(MOTOR_FORWARD);
       break;
 
     case MODE_FORWARD_RIGHT:
-      leftMotorForward();
-      rightMotorStop();
+      // left motor forward, right motor stopped
+      setLeftMotor(MOTOR_FORWARD);
+      setRightMotor(MOTOR_STOP);
       break;
 
     case MODE_BACKWARD_LEFT:
-      leftMotorStop();
-      rightMotorBackward();
+      // left motor stopped, right motor backward
+      setLeftMotor(MOTOR_STOP);
+      setRightMotor(MOTOR_BACKWARD);
       break;
 
     case MODE_BACKWARD_RIGHT:
-      leftMotorBackward();
-      rightMotorStop();
+      // left motor backward, right motor stopped
+      setLeftMotor(MOTOR_BACKWARD);
+      setRightMotor(MOTOR_STOP);
       break;
 
     case MODE_SPIN_LEFT:
-      leftMotorBackward();
-      rightMotorForward();
+      setLeftMotor(MOTOR_BACKWARD);
+      setRightMotor(MOTOR_FORWARD);
       break;
 
     case MODE_SPIN_RIGHT:
-      leftMotorForward();
-      rightMotorBackward();
+      setLeftMotor(MOTOR_FORWARD);
+      setRightMotor(MOTOR_BACKWARD);
       break;
 
     case MODE_STOP:
@@ -267,56 +229,52 @@ void applyDriveMode(DriveMode mode) {
   }
 }
 
-void leftMotorForward() {
-  digitalWrite(IN1, HIGH);
-  digitalWrite(IN2, LOW);
+void setLeftMotor(MotorDirection direction) {
+  setMotor(IN1, IN2, direction);
 }
 
-void leftMotorBackward() {
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, HIGH);
+void setRightMotor(MotorDirection direction) {
+  setMotor(IN3, IN4, direction);
 }
 
-void leftMotorStop() {
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, LOW);
-}
+void setMotor(byte pinA, byte pinB, MotorDirection direction) {
+  switch (direction) {
+    case MOTOR_FORWARD:
+      digitalWrite(pinA, HIGH);
+      digitalWrite(pinB, LOW);
+      break;
 
-void rightMotorForward() {
-  digitalWrite(IN3, HIGH);
-  digitalWrite(IN4, LOW);
-}
+    case MOTOR_BACKWARD:
+      digitalWrite(pinA, LOW);
+      digitalWrite(pinB, HIGH);
+      break;
 
-void rightMotorBackward() {
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, HIGH);
-}
-
-void rightMotorStop() {
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, LOW);
+    case MOTOR_STOP:
+    default:
+      digitalWrite(pinA, LOW);
+      digitalWrite(pinB, LOW);
+      break;
+  }
 }
 
 void stopMotors() {
-  leftMotorStop();
-  rightMotorStop();
+  setLeftMotor(MOTOR_STOP);
+  setRightMotor(MOTOR_STOP);
 }
 
-void resetSafetyLock() {
-  bool wasLocked = safetyLocked;
+bool anyButtonPressed() {
+  return forwardPressed || backwardPressed || leftPressed || rightPressed;
+}
+
+void clearAllButtons() {
+  forwardPressed  = false;
+  backwardPressed = false;
+  leftPressed     = false;
+  rightPressed    = false;
+}
+
+void resetMotionState() {
+  motionActive = false;
   safetyLocked = false;
-  motionStarted = false;
   motionStartTime = 0;
-
-  if (wasLocked) {
-    sendStatus("UNLOCKED");
-  }
-}
-
-void sendStatus(const char* message) {
-  BT.println(message);
-
-  if (DEBUG_SERIAL) {
-    Serial.println(message);
-  }
 }
