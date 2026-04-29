@@ -23,6 +23,7 @@ const unsigned long COMMAND_LOSS_TIMEOUT_MS = 350;
 
 // Incoming command format from web app:
 // STATE:<mask>
+//
 // Bit mask:
 // 1 = Forward
 // 2 = Backward
@@ -39,13 +40,31 @@ char inputBuffer[24];
 byte inputIndex = 0;
 
 byte currentMask = 0;
-byte lastNonZeroMask = 0;
 
 bool motionActive = false;
 bool safetyLocked = false;
 unsigned long motionStartTime = 0;
 unsigned long lastCommandTime = 0;
 
+// --------------------------------------------------
+// Function declarations for ArduinoDroid compatibility
+// --------------------------------------------------
+void readBluetoothLines();
+void handleLine(const char *line);
+void updateDriveControl();
+void applyMask(byte mask);
+
+void setMotorSpeeds(int leftSpeed, int rightSpeed);
+void setSingleMotor(byte pinA, byte pinB, byte enablePin, int signedSpeed);
+
+void stopMotors();
+void resetMotionTimer();
+
+bool startsWith(const char *text, const char *prefix);
+
+// --------------------------------------------------
+// Setup
+// --------------------------------------------------
 void setup() {
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
@@ -58,17 +77,25 @@ void setup() {
   BT.begin(9600);
 
   stopMotors();
+
   BT.println("READY");
+
   if (DEBUG_SERIAL) {
     Serial.println("READY");
   }
 }
 
+// --------------------------------------------------
+// Main loop
+// --------------------------------------------------
 void loop() {
   readBluetoothLines();
   updateDriveControl();
 }
 
+// --------------------------------------------------
+// Bluetooth input handling
+// --------------------------------------------------
 void readBluetoothLines() {
   while (BT.available() > 0) {
     char c = BT.read();
@@ -79,16 +106,20 @@ void readBluetoothLines() {
 
     if (c == '\n') {
       inputBuffer[inputIndex] = '\0';
+
       if (inputIndex > 0) {
         handleLine(inputBuffer);
       }
+
       inputIndex = 0;
       continue;
     }
 
     if (inputIndex < sizeof(inputBuffer) - 1) {
-      inputBuffer[inputIndex++] = c;
+      inputBuffer[inputIndex] = c;
+      inputIndex++;
     } else {
+      // Buffer overflow protection
       inputIndex = 0;
     }
   }
@@ -100,60 +131,87 @@ void handleLine(const char *line) {
     Serial.println(line);
   }
 
-  if (startsWith(line, "STATE:")) {
-    int value = atoi(line + 6);
-    if (value < 0) value = 0;
-    if (value > 15) value = 15;
+  if (!startsWith(line, "STATE:")) {
+    return;
+  }
 
-    currentMask = (byte)value;
-    lastCommandTime = millis();
+  int value = atoi(line + 6);
 
-    if (currentMask == 0) {
-      if (safetyLocked) {
-        safetyLocked = false;
-        BT.println("UNLOCKED");
+  if (value < 0) {
+    value = 0;
+  }
+
+  if (value > 15) {
+    value = 15;
+  }
+
+  currentMask = (byte)value;
+  lastCommandTime = millis();
+
+  // STATE:0 means all buttons released
+  if (currentMask == 0) {
+    if (safetyLocked) {
+      safetyLocked = false;
+      BT.println("UNLOCKED");
+
+      if (DEBUG_SERIAL) {
+        Serial.println("UNLOCKED");
       }
-      resetMotionTimer();
-      stopMotors();
-      return;
     }
 
-    lastNonZeroMask = currentMask;
+    resetMotionTimer();
+    stopMotors();
   }
 }
 
+// --------------------------------------------------
+// Driving and safety logic
+// --------------------------------------------------
 void updateDriveControl() {
+  // No buttons pressed
   if (currentMask == 0) {
     stopMotors();
     resetMotionTimer();
     return;
   }
 
+  // After safety lock, stay stopped until STATE:0 is received
   if (safetyLocked) {
     stopMotors();
     return;
   }
 
+  // If Bluetooth commands stop arriving, stop the car
   if (millis() - lastCommandTime > COMMAND_LOSS_TIMEOUT_MS) {
     currentMask = 0;
     stopMotors();
     resetMotionTimer();
+
+    if (DEBUG_SERIAL) {
+      Serial.println("COMMAND TIMEOUT");
+    }
+
     return;
   }
 
+  // Start timing when movement begins
   if (!motionActive) {
     motionActive = true;
     motionStartTime = millis();
   }
 
+  // 3-second safety auto-stop
   if (millis() - motionStartTime >= SAFETY_TIMEOUT_MS) {
     stopMotors();
     motionActive = false;
     safetyLocked = true;
+
     BT.println("SAFETY_LOCK");
+
     if (DEBUG_SERIAL) {
       Serial.println("SAFETY_LOCK");
     }
+
     return;
   }
 
@@ -181,6 +239,7 @@ void applyMask(byte mask) {
     } else {
       setMotorSpeeds(DRIVE_SPEED, DRIVE_SPEED);
     }
+
     return;
   }
 
@@ -193,6 +252,7 @@ void applyMask(byte mask) {
     } else {
       setMotorSpeeds(-DRIVE_SPEED, -DRIVE_SPEED);
     }
+
     return;
   }
 
@@ -211,6 +271,9 @@ void applyMask(byte mask) {
   stopMotors();
 }
 
+// --------------------------------------------------
+// Motor control
+// --------------------------------------------------
 void setMotorSpeeds(int leftSpeed, int rightSpeed) {
   setSingleMotor(IN1, IN2, ENA, leftSpeed);
   setSingleMotor(IN3, IN4, ENB, rightSpeed);
@@ -218,6 +281,7 @@ void setMotorSpeeds(int leftSpeed, int rightSpeed) {
 
 void setSingleMotor(byte pinA, byte pinB, byte enablePin, int signedSpeed) {
   int pwm = abs(signedSpeed);
+
   if (pwm > 255) {
     pwm = 255;
   }
@@ -246,6 +310,9 @@ void stopMotors() {
   digitalWrite(IN4, LOW);
 }
 
+// --------------------------------------------------
+// Helpers
+// --------------------------------------------------
 void resetMotionTimer() {
   motionActive = false;
   motionStartTime = 0;
@@ -253,9 +320,17 @@ void resetMotionTimer() {
 
 bool startsWith(const char *text, const char *prefix) {
   while (*prefix != '\0') {
-    if (*text++ != *prefix++) {
+    if (*text == '\0') {
       return false;
     }
+
+    if (*text != *prefix) {
+      return false;
+    }
+
+    text++;
+    prefix++;
   }
+
   return true;
 }
