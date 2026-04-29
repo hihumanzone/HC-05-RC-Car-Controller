@@ -63,6 +63,7 @@ Front ultrasonic sensor to Arduino Uno:
 Notes for ultrasonic wiring:
 - A0 and A1 are used as digital pins.
 - Mount the sensor facing forward, with a clear view in front of the car.
+- Keep the sensor away from motor wiring where possible to reduce electrical noise.
 - If you use a 3.3V microcontroller instead of an Arduino Uno, level-shift the ECHO pin.
 
 Motors to L298N:
@@ -128,15 +129,17 @@ Examples:
 - STATE:10 = Backward + Right
 - STATE:0  = Stop
 
-Extra command:
+Extra commands:
 
-- SENSOR? = Arduino immediately reports the latest front ultrasonic reading and obstacle state.
+- SENSOR?  = Arduino immediately reports the latest front ultrasonic reading and obstacle state.
+- VERSION? = Arduino reports the firmware version.
 
 Arduino telemetry
 -----------------
 The Arduino sends these status lines over Bluetooth:
 
 - READY
+- VERSION:FRONT_ULTRASONIC_FINAL_1
 - SENSORS:FRONT_ULTRASONIC_READY
 - DIST:F=42
 - DIST:F=--
@@ -147,14 +150,17 @@ The Arduino sends these status lines over Bluetooth:
 
 Distance values are in centimeters. A value of -- means no valid reading is currently available.
 
-Front ultrasonic behavior
--------------------------
+Final front ultrasonic behavior
+-------------------------------
+- Only one front ultrasonic sensor is supported.
 - The front sensor blocks forward movement when an object is about 20 cm or closer.
-- Movement is allowed again after the distance rises above about 28 cm. This hysteresis prevents jitter near the threshold.
+- Movement is considered clear again after the distance rises above about 28 cm. This hysteresis prevents jitter near the threshold.
 - Reverse and spin/turn-only commands remain available so the car can be backed or steered away from an obstacle.
-- Sensor values are filtered in code to reduce HC-SR04 noise.
-- The web controller displays the live front distance.
-- If a front obstacle is detected, the web controller clears held buttons, sends a stop command, and shows an obstacle warning.
+- Once a front obstacle stops a forward command, the Arduino requires the forward command to be released before forward motion can resume. This prevents the car from jumping forward as soon as the distance briefly clears.
+- Sensor readings are filtered with a small low-pass filter to reduce HC-SR04 jitter.
+- Sensor readings expire if no valid echo is seen for about 1 second.
+- The web controller displays the live front distance and shows stale telemetry when readings stop arriving.
+- If a front obstacle is detected, the web controller clears held controls, sends STATE:0, and shows an obstacle warning.
 
 Behavior
 --------
@@ -173,6 +179,8 @@ Open the Arduino sketch and adjust these constants if needed:
 - OBSTACLE_STOP_CM: distance at or below which forward movement is blocked. Default: 20.
 - OBSTACLE_CLEAR_CM: distance at which the front obstacle is considered clear. Default: 28.
 - ULTRASONIC_MAX_CM: maximum distance to measure. Default: 200.
+- ULTRASONIC_READ_INTERVAL_MS: how often the HC-SR04 is sampled. Default: 70.
+- DISTANCE_STALE_MS: how long to keep the last valid distance after echo loss. Default: 1000.
 - TELEMETRY_INTERVAL_MS: how often front distance data is sent to the web app. Default: 500.
 
 Website update behavior
@@ -205,3 +213,6 @@ Notes
 - The service worker lets the controller UI load like an installed app.
 - Bluetooth still requires a compatible browser and device.
 - Web Serial over Bluetooth works best in Chrome on Android after the HC-05 has already been paired in system Bluetooth settings.
+
+UI layout note:
+- The throttle controls are arranged with BACKWARD on the left and FORWARD on the right.

@@ -1,4 +1,4 @@
-const CACHE_VERSION = '2026-04-29-front-sensor-v1';
+const CACHE_VERSION = '2026-04-29-throttle-swap-v1';
 const CACHE_NAME = `hc05-rc-pwa-${CACHE_VERSION}`;
 const APP_SHELL = [
   './',
@@ -66,8 +66,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (request.mode === 'navigate' || shouldUseNetworkFirst(url)) {
+  if (request.mode === 'navigate') {
     event.respondWith(networkFirst(request, './index.html'));
+    return;
+  }
+
+  if (shouldUseNetworkFirst(url)) {
+    event.respondWith(networkFirst(request));
     return;
   }
 
@@ -79,7 +84,7 @@ function shouldUseNetworkFirst(url) {
   return NETWORK_FIRST_FILES.has(fileName);
 }
 
-async function networkFirst(request, fallbackUrl) {
+async function networkFirst(request, fallbackUrl = null) {
   const cache = await caches.open(CACHE_NAME);
 
   try {

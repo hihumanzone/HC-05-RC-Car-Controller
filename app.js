@@ -2,7 +2,7 @@ const SPP_UUID = '00001101-0000-1000-8000-00805f9b34fb';
 const COMMAND_INTERVAL_MS = 120;
 const SENSOR_STALE_MS = 2500;
 const OBSTACLE_STOP_CM = 20;
-const APP_VERSION = '2026.04.29-front-sensor.1';
+const APP_VERSION = '2026.04.29-throttle-swap.1';
 
 const BIT_FORWARD = 1;
 const BIT_BACKWARD = 2;
@@ -39,7 +39,14 @@ let commandTimer = null;
 let lastSentMask = null;
 let intentionallyDisconnecting = false;
 let deferredInstallPrompt = null;
-let lastSensorUpdateTime = 0;
+let activeErrorType = null;
+
+const sensorState = {
+  frontCm: null,
+  obstacle: false,
+  ready: false,
+  lastUpdateTime: 0,
+};
 
 const statusText = document.getElementById('statusText');
 const statusDot = document.getElementById('statusDot');
@@ -69,6 +76,7 @@ async function initialize() {
   await registerServiceWorker();
   detectSerialSupport();
   await checkForPreviouslyGrantedPorts();
+  renderSensorState();
   setInterval(markSensorsStaleIfNeeded, 1000);
 }
 
@@ -395,6 +403,7 @@ async function connectToCar() {
 
     readFromArduino();
     await sendCurrentState(true);
+    await requestFirmwareVersion();
     await requestSensorStatus();
   } catch (error) {
     await safeResetConnectionState();
@@ -418,7 +427,7 @@ async function requestBluetoothSerialPort() {
     });
   } catch (error) {
     const message = formatError(error).toLowerCase();
-    const shouldFallback = error && error.name === 'TypeError' || message.includes('bluetoothserviceclassid');
+    const shouldFallback = (error && error.name === 'TypeError') || message.includes('bluetoothserviceclassid');
     if (!shouldFallback) {
       throw error;
     }
@@ -434,6 +443,7 @@ async function disconnectFromCar() {
   setStatus('Disconnected', '');
   arduinoMessage.textContent = 'Disconnected';
   portName.textContent = 'None';
+  resetSensorState();
 }
 
 async function closeSerialConnection() {
@@ -537,9 +547,14 @@ function handleArduinoMessage(message) {
     return;
   }
 
+  if (message.startsWith('VERSION:')) {
+    arduinoMessage.textContent = message.replace('VERSION:', 'Firmware ');
+    return;
+  }
+
   if (message === 'SENSORS:FRONT_ULTRASONIC_READY' || message === 'SENSORS:ULTRASONIC_READY') {
-    sensorStatus.textContent = 'Front sensor ready';
-    sensorCard.classList.remove('warning', 'stale');
+    sensorState.ready = true;
+    renderSensorState();
     return;
   }
 
@@ -549,40 +564,32 @@ function handleArduinoMessage(message) {
     sendCurrentState(true);
     updatePressedStyles();
     updateCommandLabel();
-    showError('Safety auto-stop triggered after 3 seconds. Release all buttons, then press again to continue.', 'Safety stop');
+    showError(
+      'Safety auto-stop triggered after 3 seconds. Release all buttons, then press again to continue.',
+      'Safety stop',
+      'safety'
+    );
     return;
   }
 
   if (message === 'UNLOCKED') {
-    clearError();
+    clearError('safety');
     setStatus('Connected', 'connected');
   }
 }
 
 function updateSensorReadings(message) {
-  // Front-only firmware sends DIST:F=<cm>. The optional ,R=... part is accepted
-  // so the web app still understands older two-sensor firmware if it is flashed.
-  const match = message.match(/^DIST:F=([^,]+)(?:,R=(.+))?$/);
+  // Final front-only firmware sends DIST:F=<cm>. A legacy rear value is ignored
+  // so the controller remains compatible with older test firmware.
+  const match = message.match(/^DIST:F=([^,]+)(?:,R=[^,]+)?$/);
   if (!match) {
     return;
   }
 
-  const frontCm = parseDistanceCm(match[1]);
-  frontDistance.textContent = formatDistance(frontCm);
-  lastSensorUpdateTime = Date.now();
-
-  sensorCard.classList.remove('stale');
-
-  const frontClose = frontCm !== null && frontCm <= OBSTACLE_STOP_CM;
-  sensorCard.classList.toggle('warning', frontClose);
-
-  if (frontClose) {
-    sensorStatus.textContent = 'Front obstacle detected';
-  } else if (frontCm === null) {
-    sensorStatus.textContent = 'No valid front distance reading yet';
-  } else {
-    sensorStatus.textContent = 'Path ahead clear';
-  }
+  sensorState.frontCm = parseDistanceCm(match[1]);
+  sensorState.ready = true;
+  sensorState.lastUpdateTime = Date.now();
+  renderSensorState();
 }
 
 function parseDistanceCm(value) {
@@ -608,44 +615,86 @@ function handleObstacleMessage(message) {
   const direction = message.split(':')[1] || '';
 
   if (direction === 'CLEAR') {
-    sensorCard.classList.remove('warning');
-    sensorStatus.textContent = 'Path ahead clear';
-    clearError();
+    sensorState.obstacle = false;
+    renderSensorState();
+    clearError('obstacle');
     setStatus('Connected', 'connected');
     return;
   }
+
+  if (direction !== 'FRONT') {
+    return;
+  }
+
+  sensorState.obstacle = true;
+  sensorState.ready = true;
+  sensorState.lastUpdateTime = Date.now();
 
   clearAllControls();
   stopHeartbeat();
   sendCurrentState(true);
 
-  sensorCard.classList.add('warning');
-  const readableDirection = obstacleDirectionLabel(direction);
-  sensorStatus.textContent = `${readableDirection} obstacle detected`;
-  showError(`${readableDirection} obstacle detected. Motors stopped; reverse or steer away until the front path is clear.`, 'Obstacle stop');
+  renderSensorState();
+  showError(
+    'Front obstacle detected. Motors stopped; reverse or steer away until the front path is clear.',
+    'Obstacle stop',
+    'obstacle'
+  );
 }
 
-function obstacleDirectionLabel(direction) {
-  switch (direction) {
-    case 'FRONT':
-      return 'Front';
-    default:
-      return 'Ultrasonic';
+function renderSensorState() {
+  const stale = sensorState.lastUpdateTime > 0 && Date.now() - sensorState.lastUpdateTime > SENSOR_STALE_MS;
+  const frontClose = sensorState.frontCm !== null && sensorState.frontCm <= OBSTACLE_STOP_CM;
+  const warning = sensorState.obstacle || frontClose;
+
+  frontDistance.textContent = formatDistance(sensorState.frontCm);
+  sensorCard.classList.toggle('warning', warning);
+  sensorCard.classList.toggle('stale', stale);
+
+  if (sensorState.obstacle) {
+    sensorStatus.textContent = 'Front obstacle detected';
+  } else if (stale) {
+    sensorStatus.textContent = 'Front sensor telemetry paused';
+  } else if (!sensorState.ready && sensorState.lastUpdateTime === 0) {
+    sensorStatus.textContent = 'Waiting for sensor readings';
+  } else if (frontClose) {
+    sensorStatus.textContent = 'Front obstacle detected';
+  } else if (sensorState.frontCm === null) {
+    sensorStatus.textContent = 'No valid front distance reading yet';
+  } else {
+    sensorStatus.textContent = 'Path ahead clear';
   }
+}
+
+function resetSensorState() {
+  sensorState.frontCm = null;
+  sensorState.obstacle = false;
+  sensorState.ready = false;
+  sensorState.lastUpdateTime = 0;
+  renderSensorState();
 }
 
 function markSensorsStaleIfNeeded() {
-  if (!lastSensorUpdateTime) {
+  if (!sensorState.lastUpdateTime) {
     return;
   }
 
-  if (Date.now() - lastSensorUpdateTime <= SENSOR_STALE_MS) {
+  if (Date.now() - sensorState.lastUpdateTime <= SENSOR_STALE_MS) {
     return;
   }
 
-  sensorCard.classList.add('stale');
-  if (!sensorCard.classList.contains('warning')) {
-    sensorStatus.textContent = 'Front sensor telemetry paused';
+  renderSensorState();
+}
+
+async function requestFirmwareVersion() {
+  if (!writer) {
+    return;
+  }
+
+  try {
+    await writer.write(new TextEncoder().encode('VERSION?\n'));
+  } catch (error) {
+    console.warn('Firmware version request failed:', error);
   }
 }
 
@@ -768,20 +817,27 @@ async function safeResetConnectionState() {
   setStatus('Disconnected', '');
   arduinoMessage.textContent = 'Disconnected';
   portName.textContent = 'None';
+  resetSensorState();
 }
 
 function formatError(error) {
   return error && error.message ? error.message : String(error);
 }
 
-function showError(message, statusLabel = 'Error') {
+function showError(message, statusLabel = 'Error', errorType = 'generic') {
+  activeErrorType = errorType;
   errorBox.textContent = message;
   errorBox.classList.add('show');
   statusText.textContent = statusLabel;
   statusDot.className = 'dot error';
 }
 
-function clearError() {
+function clearError(errorType = null) {
+  if (errorType && activeErrorType !== errorType) {
+    return;
+  }
+
+  activeErrorType = null;
   errorBox.textContent = '';
   errorBox.classList.remove('show');
 }
