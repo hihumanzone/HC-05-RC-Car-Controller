@@ -1,4 +1,5 @@
-const CACHE_NAME = 'hc05-rc-pwa-v2';
+const CACHE_VERSION = '2026-04-29-cache-fix-v3';
+const CACHE_NAME = `hc05-rc-pwa-${CACHE_VERSION}`;
 const APP_SHELL = [
   './',
   './index.html',
@@ -11,44 +12,111 @@ const APP_SHELL = [
   './icons/icon-maskable-512.png'
 ];
 
+const NETWORK_FIRST_FILES = new Set([
+  '',
+  'index.html',
+  'styles.css',
+  'app.js',
+  'manifest.webmanifest'
+]);
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(CACHE_NAME)
+      .then((cache) => cache.addAll(APP_SHELL))
+      .then(() => self.skipWaiting())
   );
-  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) => Promise.all(
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(
       keys
         .filter((key) => key !== CACHE_NAME)
         .map((key) => caches.delete(key))
-    ))
-  );
-  self.clients.claim();
+    );
+    await self.clients.claim();
+  })());
 });
 
-self.addEventListener('fetch', (event) => {
-  if (event.request.method !== 'GET') {
+self.addEventListener('message', (event) => {
+  if (!event.data || event.data.type !== 'SKIP_WAITING') {
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-
-      return fetch(event.request)
-        .then((networkResponse) => {
-          const responseCopy = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseCopy);
-          });
-          return networkResponse;
-        })
-        .catch(() => caches.match('./index.html'));
-    })
-  );
+  self.skipWaiting();
 });
+
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+
+  if (request.method !== 'GET') {
+    return;
+  }
+
+  const url = new URL(request.url);
+
+  if (url.origin !== self.location.origin) {
+    return;
+  }
+
+  if (url.pathname.endsWith('/sw.js')) {
+    event.respondWith(fetch(request, { cache: 'no-store' }));
+    return;
+  }
+
+  if (request.mode === 'navigate' || shouldUseNetworkFirst(url)) {
+    event.respondWith(networkFirst(request, './index.html'));
+    return;
+  }
+
+  event.respondWith(staleWhileRevalidate(request));
+});
+
+function shouldUseNetworkFirst(url) {
+  const fileName = url.pathname.split('/').pop() || '';
+  return NETWORK_FIRST_FILES.has(fileName);
+}
+
+async function networkFirst(request, fallbackUrl) {
+  const cache = await caches.open(CACHE_NAME);
+
+  try {
+    const networkResponse = await fetch(request, { cache: 'reload' });
+    if (networkResponse && networkResponse.ok) {
+      await cache.put(request, networkResponse.clone());
+    }
+    return networkResponse;
+  } catch (error) {
+    const cachedResponse = await cache.match(request, { ignoreSearch: true });
+    if (cachedResponse) {
+      return cachedResponse;
+    }
+
+    if (fallbackUrl) {
+      const fallbackResponse = await cache.match(fallbackUrl, { ignoreSearch: true });
+      if (fallbackResponse) {
+        return fallbackResponse;
+      }
+    }
+
+    return Response.error();
+  }
+}
+
+async function staleWhileRevalidate(request) {
+  const cache = await caches.open(CACHE_NAME);
+  const cachedResponse = await cache.match(request, { ignoreSearch: true });
+
+  const networkPromise = fetch(request)
+    .then((networkResponse) => {
+      if (networkResponse && networkResponse.ok) {
+        cache.put(request, networkResponse.clone());
+      }
+      return networkResponse;
+    })
+    .catch(() => null);
+
+  return cachedResponse || await networkPromise || Response.error();
+}

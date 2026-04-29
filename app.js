@@ -2,7 +2,7 @@ const SPP_UUID = '00001101-0000-1000-8000-00805f9b34fb';
 const COMMAND_INTERVAL_MS = 120;
 const SENSOR_STALE_MS = 2500;
 const OBSTACLE_STOP_CM = 20;
-const SW_CACHE_NAME = 'hc05-rc-pwa-v2';
+const APP_VERSION = '2026.04.29-cache-fix.1';
 
 const BIT_FORWARD = 1;
 const BIT_BACKWARD = 2;
@@ -60,6 +60,11 @@ const driveButtons = Array.from(document.querySelectorAll('.drive-button'));
 initialize();
 
 async function initialize() {
+  const updateResetHandled = await handleForcedAppUpdateFromUrl();
+  if (updateResetHandled) {
+    return;
+  }
+
   updateAppMode();
   registerUiEvents();
   await registerServiceWorker();
@@ -117,13 +122,84 @@ function updateAppMode() {
   appMode.textContent = standalone ? 'Installed PWA' : 'Browser';
 }
 
+async function handleForcedAppUpdateFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const updateRequested = params.has('update') || params.has('clear-cache') || params.get('reload') === 'fresh';
+
+  if (!updateRequested) {
+    return false;
+  }
+
+  try {
+    if ('caches' in window) {
+      const cacheNames = await caches.keys();
+      await Promise.all(cacheNames.map((name) => caches.delete(name)));
+    }
+
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+    }
+  } catch (error) {
+    console.warn('App cache reset failed:', error);
+  }
+
+  params.delete('update');
+  params.delete('clear-cache');
+  if (params.get('reload') === 'fresh') {
+    params.delete('reload');
+  }
+
+  const cleanedQuery = params.toString();
+  const cleanUrl = `${window.location.pathname}${cleanedQuery ? `?${cleanedQuery}` : ''}${window.location.hash}`;
+  window.location.replace(cleanUrl);
+  return true;
+}
+
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) {
     return;
   }
 
+  let refreshingForNewWorker = false;
+  const hadControllerAtStartup = Boolean(navigator.serviceWorker.controller);
+
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadControllerAtStartup || refreshingForNewWorker) {
+      return;
+    }
+
+    refreshingForNewWorker = true;
+    window.location.reload();
+  });
+
   try {
-    await navigator.serviceWorker.register('./sw.js');
+    const registration = await navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' });
+
+    if (registration.waiting) {
+      registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+    }
+
+    registration.addEventListener('updatefound', () => {
+      const newWorker = registration.installing;
+      if (!newWorker) {
+        return;
+      }
+
+      newWorker.addEventListener('statechange', () => {
+        if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+          newWorker.postMessage({ type: 'SKIP_WAITING' });
+        }
+      });
+    });
+
+    await registration.update();
+
+    window.setInterval(() => {
+      registration.update().catch((error) => {
+        console.warn('Service worker update check failed:', error);
+      });
+    }, 60 * 60 * 1000);
   } catch (error) {
     console.warn('Service worker registration failed:', error);
   }
